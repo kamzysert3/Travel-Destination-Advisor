@@ -11,7 +11,7 @@
             <div class="card destination-card">
                 <!-- Display image -->
                 <div class="mb-3">
-                    <img src="{{ destination.image_url }}" class="card-img-top" alt="Image of {{ destination.name }}">
+                    <img src="{{ destination.image_url if destination.image_url else 'https://placehold.co/600x400?text=No+Image' }}" class="card-img-top" alt="Image of {{ destination.name }}">
                 </div>
                 <div class="card-body">
                     <h5 class="card-title">{{ destination.name }}</h5>
