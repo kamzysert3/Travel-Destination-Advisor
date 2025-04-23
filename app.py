@@ -3,7 +3,11 @@ from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime
 from services.api_service import TravelAPI
 import re
-from sqlalchemy import and_, or_
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import StandardScaler
+import joblib
+import os
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///travel.db'
@@ -42,19 +46,81 @@ def calculate_score(destination, user_prefs):
     score = (0.4 * climate_score + 0.3 * budget_score + 0.3 * rating_score) * 100
     return round(score, 2)
 
+def train_kmeans_model():
+    destinations = Destination.query.all()
+
+    if not destinations:
+        return None, None, None
+
+    data = []
+    for d in destinations:
+        try:
+            budget = {'Low': 0, 'Medium': 1, 'High': 2}.get(d.budget_category, 1)
+            climate = {'Tropical': 0, 'Savannah': 1, 'Arid': 2, 'Temperate': 3}.get(d.climate, 1)
+            rating = d.rating if d.rating is not None else 0
+            data.append({'id': d.id, 'budget': budget, 'climate': climate, 'rating': rating})
+        except:
+            continue
+
+    df = pd.DataFrame(data)
+    scaler = StandardScaler()
+    X = scaler.fit_transform(df[['budget', 'climate', 'rating']])
+    model = KMeans(n_clusters=5, random_state=42)
+    model.fit(X)
+    df['cluster'] = model.labels_
+
+    joblib.dump(model, 'kmeans_model.pkl')
+    joblib.dump(scaler, 'scaler.pkl')
+    df[['id', 'cluster']].to_csv('clusters.csv', index=False)
+
+    return model, scaler, df[['id', 'cluster']]
+
+def get_user_cluster(user_prefs):
+    if not os.path.exists('kmeans_model.pkl') or not os.path.exists('scaler.pkl'):
+        train_kmeans_model()
+
+    model = joblib.load('kmeans_model.pkl')
+    scaler = joblib.load('scaler.pkl')
+
+    user_vector = pd.DataFrame([{
+        'budget': {'Low': 0, 'Medium': 1, 'High': 2}.get(user_prefs['budget'], 1),
+        'climate': {'Tropical': 0, 'Savannah': 1, 'Arid': 2, 'Temperate': 3}.get(user_prefs['climate'], 1),
+        'rating': float(user_prefs['rating'])
+    }])
+    X_user = scaler.transform(user_vector)
+    return model.predict(X_user)[0]
+
 
 @app.route('/')
 def home():
     page = request.args.get('page', 1, type=int)  # Get current page, default to 1
 
+    cluster = get_user_cluster(user_prefs)
+    cluster_df = pd.read_csv('clusters.csv')
+    cluster_ids = cluster_df[cluster_df['cluster'] == cluster]['id'].tolist()
+
     destinations = Destination.query.all()
+
+    cluster_dests = []
+    other_dests = []
+
     for dest in destinations:
         dest.name = re.sub(r'^\s*\d+[\.\-\s]*', '', dest.name)
         price = int(dest.price.replace("NGN", "").replace(",", "").strip()) if dest.price else dest.price
         dest.price = "NGN {:,}".format(price) if price else dest.price
         dest.score = calculate_score(dest, user_prefs)
+        # Separate cluster and non-cluster
+        if dest.id in cluster_ids:
+            cluster_dests.append(dest)
+        else:
+            other_dests.append(dest)
 
-    sorted_destinations = sorted(destinations, key=lambda d: d.score, reverse=True)
+    # Sort both lists by score
+    cluster_dests.sort(key=lambda d: d.score, reverse=True)
+    other_dests.sort(key=lambda d: d.score, reverse=True)
+
+    # Merge results: cluster ones first
+    sorted_destinations = cluster_dests + other_dests
 
     # Paginate manually (slice the sorted list)
     total = len(sorted_destinations)
@@ -73,42 +139,37 @@ def home():
         }
     )
 
-@app.route('/suggest', methods=['POST'])
+@app.route('/suggest', methods=['GET', 'POST'])
 def suggest_destinations():
     page = request.args.get('page', 1, type=int)  # Get current page, default to 1
     budget = request.form.get('budget') 
     weather = request.form.get('weather') 
     rating = request.form.get('rating')
 
-    user_prefs['budget'] = budget if budget else user_prefs['budget']
-    user_prefs['climate'] = weather if weather else user_prefs['climate']
-    user_prefs['rating'] = rating if rating else user_prefs['rating']
-
     filter_data = {
-        'budget': budget,
-        'climate': weather,
-        'rating': rating,
+        'budget': budget if budget else user_prefs['budget'],
+        'climate': weather if weather else user_prefs['climate'],
+        'rating': rating if rating else user_prefs['rating'],
     }
 
     try:
-        destinations = Destination.query.filter(
-            (Destination.budget_category == budget if budget else True) &
-            (Destination.climate == weather if weather else True) &
-            ((Destination.rating != None) & (Destination.rating >= float(rating)) if rating else True)
-        ).all()
+        cluster = get_user_cluster(filter_data)
+        cluster_df = pd.read_csv('clusters.csv')
+        cluster_ids = cluster_df[cluster_df['cluster'] == cluster]['id'].tolist()
+
+        destinations = Destination.query.filter(Destination.id.in_(cluster_ids)).all()
+
         for dest in destinations:
             dest.name = re.sub(r'^\s*\d+[\.\-\s]*', '', dest.name)
             price = int(dest.price.replace("NGN", "").replace(",", "").strip()) if dest.price else dest.price
             dest.price = "NGN {:,}".format(price) if price else dest.price
-            dest.score = calculate_score(dest, user_prefs)
+            dest.score = calculate_score(dest, filter_data)  # Now every result is relevant by cluster
+
     except Exception as e:
-        print(f"Error fetching destinations: {e}")
+        print(f"Clustering error: {e}")
         destinations = []
 
-    # Sort destinations by score
-    sorted_destinations = sorted(destinations, key=lambda d: d.score, reverse=True)
-
-    # Paginate manually (slice the sorted list)
+    sorted_destinations = sorted(destinations, key=lambda d: d.rating or 0, reverse=True)
     total = len(sorted_destinations)
     paginated_destinations = sorted_destinations[(page - 1) * per_page : page * per_page]
 
@@ -118,25 +179,51 @@ def suggest_destinations():
         page=page,
         total_pages=(total + per_page - 1) // per_page,  # Ceiling division
         filtered=True,  # Indicate that this is a filtered result
-        form_data=filter_data
+        form_data={
+            'budget': budget if budget else None,
+            'climate': weather if weather else None,
+            'rating': rating if rating else None,
+        }
     )
 
 
-@app.route('/search', methods=['POST'])
+@app.route('/search', methods=['GET', 'POST'])
 def search_destinations():
     page = request.args.get('page', 1, type=int)  # Get current page, default to 1
     search_term = request.form.get('search_term')
 
     try:
+        cluster = get_user_cluster(user_prefs)
+        cluster_df = pd.read_csv('clusters.csv')
+        cluster_ids = cluster_df[cluster_df['cluster'] == cluster]['id'].tolist()
+
+        
         destinations = Destination.query.filter(
             (Destination.name.ilike(f'%{search_term}%')) |
             (Destination.city.ilike(f'%{search_term}%'))
         ).all()
+
+        cluster_dests = []
+        other_dests = []
+
         for dest in destinations:
             dest.name = re.sub(r'^\s*\d+[\.\-\s]*', '', dest.name)
             price = int(dest.price.replace("NGN", "").replace(",", "").strip()) if dest.price else dest.price
             dest.price = "NGN {:,}".format(price) if price else dest.price
             dest.score = calculate_score(dest, user_prefs)
+            # Separate cluster and non-cluster
+            if dest.id in cluster_ids:
+                cluster_dests.append(dest)
+            else:
+                other_dests.append(dest)
+
+        # Sort both lists by score
+        cluster_dests.sort(key=lambda d: d.score, reverse=True)
+        other_dests.sort(key=lambda d: d.score, reverse=True)
+
+        # Merge results: cluster ones first
+        sorted_destinations = cluster_dests + other_dests
+
     except Exception as e:
         print(f"Search error: {e}")
         destinations = []
@@ -165,4 +252,6 @@ def search_destinations():
 if __name__ == '__main__':
     with app.app_context():
         db.create_all()
+        if not os.path.exists('clusters.csv'):
+            train_kmeans_model()
     app.run(debug=True)
