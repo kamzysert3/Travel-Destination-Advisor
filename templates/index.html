@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+
+{% block content %}
+    <div class="row justify-content-center">
+        <div class="input-group mb-4">
+            <form action="{{ url_for('search_destinations') }}" method="post" class="input-group">
+                <button class="btn btn-primary" type="submit" id="searchButton">
+                    <i class="fas fa-search"></i>
+                </button>
+                <input type="text" class="form-control search-field" name="search_term" placeholder="Search destinations...">
+                <button type="button" class="btn btn-primary position-relative" data-bs-toggle="modal" data-bs-target="#filterModal">
+                    <i class="fas fa-filter"></i> 
+                    <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger border border-light rounded-circle filter-indicator {% if not filtered %}d-none{% endif %}">
+                    </span>
+                </button>
+            </form>
+        </div>
+
+        {% include 'suggestions.html' %}
+    </div>
+
+    <!-- Filter Modal -->
+    <div class="modal fade" id="filterModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Filter Options</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="card">
+                        <div class="card-body">
+                            <h2 class="card-title text-center mb-4">Find Your Perfect Destination</h2>
+                            <form action="{{ url_for('suggest_destinations') }}" method="POST">
+                                <div class="mb-3">
+                                    <label for="budget" class="form-label">Budget Range</label>
+                                    <select class="form-select" name="budget" id="budget">
+                                        <option value="" disabled {% if form_data.budget == None %}selected{% endif %}>Select your budget</option>
+                                        <option value="Low" {% if form_data.budget == 'Low' %}selected{% endif %}>Low (Under NGN 50 000)</option>
+                                        <option value="Medium" {% if form_data.budget == 'Medium' %}selected{% endif %}>Medium (NGN 50 000 - NGN 200 000)</option>
+                                        <option value="High" {% if form_data.budget == 'High' %}selected{% endif %}>High (Above NGN 200 000)</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="weather" class="form-label">Preferred Weather</label>
+                                    <select class="form-select" name="weather" id="weather">
+                                        <option value="" disabled {% if form_data.climate == None %}selected{% endif %}>Select weather preference</option>
+                                        <option value="Tropical"{% if form_data.climate == 'Tropical' %}selected{% endif %}>Tropical</option>
+                                        <option value="Savanna"{% if form_data.climate == 'Savanna' %}selected{% endif %}>Savanna</option>
+                                        <option value="Arid"{% if form_data.climate == 'Arid' %}selected{% endif %}>Arid</option>
+                                        <option value="Temperate"{% if form_data.climate == 'Temperate' %}selected{% endif %}>Temperate</option>
+                                    </select>
+                                </div>
+                                
+                                <div class="mb-3">
+                                    <label for="rating" class="form-label">Preferred Rating</label>
+                                    <select class="form-select" name="rating" id="rating">
+                                        <option value="" disabled {% if form_data.rating == None %}selected{% endif %}>Select Rating preference</option>
+                                        <option value="1" {% if form_data.rating == '1' %}selected{% endif %}>1.0</option>
+                                        <option value="2" {% if form_data.rating == '2' %}selected{% endif %}>2.0</option>
+                                        <option value="3" {% if form_data.rating == '3' %}selected{% endif %}>3.0</option>
+                                        <option value="4" {% if form_data.rating == '4' %}selected{% endif %}>4.0</option>
+                                        <option value="5" {% if form_data.rating == '5' %}selected{% endif %}>5.0</option>
+                                    </select>
+                                </div>
+
+                                <div class="mb-3 d-flex gap-2">
+                                    <input type="submit" class="btn btn-primary w-100" value="Apply Filters">
+                                    <a href="{{ url_for('home') }}" class="btn btn-outline-secondary w-100">Clear Filters</a>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+{% endblock %}

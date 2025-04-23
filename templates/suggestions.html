@@ -1,0 +1,38 @@
+<div class="row mb-4">
+    <div class="col">
+        <h2>Suggested Destinations</h2>
+    </div>
+</div>
+
+<div class="row">
+    {% if destinations %}
+        {% for destination in destinations %}
+        <div class="col-md-4">
+            <div class="card destination-card">
+                <!-- Display image -->
+                <div class="mb-3">
+                    <img src="{{ destination.image_url }}" class="card-img-top" alt="Image of {{ destination.name }}">
+                </div>
+                <div class="card-body">
+                    <h5 class="card-title">{{ destination.name }}</h5>
+                    <h6 class="card-subtitle mb-2 text-muted">{{ destination.city }}</h6>
+                    <p class="card-text">{{ destination.info }}</p>
+                    <ul class="list-unstyled">
+                        <li><strong>Climate:</strong> {{ destination.climate }}</li>
+                        <li><strong>Budget Category:</strong> {{ destination.budget_category }}</li>
+                    </ul>
+                    <div class="mt-3">
+                        <strong>Price:</strong> {{ destination.price }}
+                    </div>
+                </div>
+            </div>
+        </div>        
+        {% endfor %}
+    {% else %}
+        <div class="col">
+            <div class="alert alert-info">
+                No destinations found matching your criteria. Try adjusting your preferences.
+            </div>
+        </div>
+    {% endif %}
+</div>
